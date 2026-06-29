@@ -35,7 +35,7 @@ FORCE_PORT=
 MODE=v4
 
 log() {
-  printf '%s\n' "$*" >&2
+  printf '[warp-lite] %s\n' "$*" >&2
 }
 
 need_root() {
@@ -113,6 +113,7 @@ detect_os() {
       OS_ID=unknown
       ;;
   esac
+  log "detected os: $OS_ID"
 }
 
 select_profile() {
@@ -131,11 +132,13 @@ select_profile() {
     PORTS="$LOW_RESOURCE_PORTS"
     DNS_SERVERS="$LOW_RESOURCE_DNS"
     PROBE_SLEEP=4
+    log "profile: low-resource"
   else
     ENDPOINTS="$DEFAULT_ENDPOINTS"
     PORTS="$DEFAULT_PORTS"
     DNS_SERVERS="$DEFAULT_DNS"
     PROBE_SLEEP=6
+    log "profile: standard"
   fi
 
   if [ -n "$FORCE_ENDPOINT" ]; then
@@ -144,10 +147,17 @@ select_profile() {
   if [ -n "$FORCE_PORT" ]; then
     PORTS="$FORCE_PORT"
   fi
+  log "mode: $MODE"
+  log "endpoints: $ENDPOINTS"
+  log "ports: $PORTS"
 }
 
 install_deps() {
-  [ "$SKIP_DEPS" = "1" ] && return 0
+  [ "$SKIP_DEPS" = "1" ] && {
+    log "skipping dependency install"
+    return 0
+  }
+  log "installing dependencies"
   case "$OS_ID" in
     alpine)
       apk add --no-cache wireguard-tools iptables ip6tables openresolv curl >/dev/null
@@ -162,9 +172,11 @@ install_deps() {
       exit 1
       ;;
   esac
+  log "dependencies ready"
 }
 
 write_dns() {
+  log "writing dns to $DNS_FILE"
   : > "$DNS_FILE"
   for ns in $DNS_SERVERS; do
     printf 'nameserver %s\n' "$ns" >> "$DNS_FILE"
@@ -226,6 +238,7 @@ read_state() {
 
 download_self_copy() {
   mkdir -p /root
+  log "saving installer copy to $INSTALL_COPY"
   if command -v curl >/dev/null 2>&1; then
     curl -fsSL "$SCRIPT_URL" -o "$INSTALL_COPY" 2>/dev/null || true
   elif command -v wget >/dev/null 2>&1; then
@@ -245,7 +258,7 @@ bring_up() {
 try_up() {
   endpoint="$1"
   port="$2"
-  log "==> trying [$endpoint]:$port ($MODE)"
+  log "trying [$endpoint]:$port ($MODE)"
   write_conf "$endpoint" "$port"
   bring_down
   if ! bring_up; then
@@ -253,11 +266,14 @@ try_up() {
     cat /tmp/warp-lite-up.log >&2 || true
     return 1
   fi
+  log "waiting ${PROBE_SLEEP}s for handshake"
   sleep "$PROBE_SLEEP"
   if wg show warp | grep -q 'latest handshake'; then
+    log "handshake ok on [$endpoint]:$port"
     save_state "$endpoint" "$port"
     return 0
   fi
+  log "no handshake on [$endpoint]:$port"
   return 1
 }
 
@@ -406,6 +422,7 @@ install_main() {
   select_profile
   install_deps
   write_dns
+  log "probing endpoints"
   if ! result="$(probe_all)"; then
     echo 'No working endpoint/port found' >&2
     exit 1
@@ -430,6 +447,7 @@ reprobe_main() {
   select_profile
   install_deps
   write_dns
+  log "reprobing endpoints"
   result="$(probe_all)"
   endpoint=$(echo "$result" | awk '{print $1}')
   port=$(echo "$result" | awk '{print $2}')
