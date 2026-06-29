@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-SCRIPT_URL="https://raw.githubusercontent.com/troublessh/alpine-warp-ipv4-installer/main/warp-ipv4-installer.sh"
+SCRIPT_URL="https://raw.githubusercontent.com/troublessh/warp-lite/main/warp-ipv4-installer.sh"
 CONF_DIR=/etc/wireguard
 CONF_FILE=$CONF_DIR/warp.conf
 DNS_FILE=/etc/resolv.conf

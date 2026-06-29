@@ -18,13 +18,13 @@
 ## 一键安装
 
 ```sh
-wget -qO- https://raw.githubusercontent.com/troublessh/alpine-warp-ipv4-installer/main/warp-ipv4-installer.sh | sh
+wget -qO- https://raw.githubusercontent.com/troublessh/warp-lite/main/warp-ipv4-installer.sh | sh
 ```
 
 或：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/troublessh/alpine-warp-ipv4-installer/main/warp-ipv4-installer.sh | sh
+curl -fsSL https://raw.githubusercontent.com/troublessh/warp-lite/main/warp-ipv4-installer.sh | sh
 ```
 
 ## 低性能机器模式
@@ -36,13 +36,13 @@ curl -fsSL https://raw.githubusercontent.com/troublessh/alpine-warp-ipv4-install
 - 少一次 trace 输出
 
 ```sh
-wget -qO- https://raw.githubusercontent.com/troublessh/alpine-warp-ipv4-installer/main/warp-ipv4-installer.sh | sh -s -- install --low-resource
+wget -qO- https://raw.githubusercontent.com/troublessh/warp-lite/main/warp-ipv4-installer.sh | sh -s -- install --low-resource
 ```
 
 或：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/troublessh/alpine-warp-ipv4-installer/main/warp-ipv4-installer.sh | sh -s -- install --low-resource
+curl -fsSL https://raw.githubusercontent.com/troublessh/warp-lite/main/warp-ipv4-installer.sh | sh -s -- install --low-resource
 ```
 
 ## 安装后命令
