@@ -1,19 +1,19 @@
 #!/bin/sh
 set -eu
 
-SCRIPT_URL="https://raw.githubusercontent.com/troublessh/warp-lite/main/warp-ipv4-installer.sh"
+SCRIPT_URL="https://raw.githubusercontent.com/troublessh/warp-lite/main/warp-lite.sh"
 CONF_DIR=/etc/wireguard
 CONF_FILE=$CONF_DIR/warp.conf
 DNS_FILE=/etc/resolv.conf
-WRAPPER=/usr/local/bin/warp-ipv4
-STATE_DIR=/var/lib/warp-ipv4
+WRAPPER=/usr/local/bin/warp-lite
+STATE_DIR=/var/lib/warp-lite
 STATE_FILE=$STATE_DIR/active-endpoint
 LIBEXEC_DIR=/usr/local/libexec
-DNS_HELPER=$LIBEXEC_DIR/warp-ipv4-write-dns.sh
-LOCAL_START=/etc/local.d/warp.start
-LOCAL_STOP=/etc/local.d/warp.stop
-SYSTEMD_SERVICE=/etc/systemd/system/warp-ipv4.service
-INSTALL_COPY=/root/warp-ipv4-installer.sh
+DNS_HELPER=$LIBEXEC_DIR/warp-lite-write-dns.sh
+LOCAL_START=/etc/local.d/warp-lite.start
+LOCAL_STOP=/etc/local.d/warp-lite.stop
+SYSTEMD_SERVICE=/etc/systemd/system/warp-lite.service
+INSTALL_COPY=/root/warp-lite.sh
 
 DEFAULT_ENDPOINTS="2606:4700:d0::a29f:c001 2606:4700:d0::a29f:c005"
 DEFAULT_PORTS="500 1701 4500 2408"
@@ -23,6 +23,7 @@ DEFAULT_DNS="2606:4700:4700::1111 2606:4700:4700::1001 2001:4860:4860::8888"
 LOW_RESOURCE_DNS="2606:4700:4700::1111 2001:4860:4860::8888"
 
 PRIVATE_KEY='hTk06uwwXhZx3RVqtug3MQ0RSodzdM/U5z/M5NIbh4c='
+WARP_V4='172.16.0.2'
 WARP_V6='2606:4700:110:8921:bf06:c4d7:40b7:8afd'
 PEER_KEY='bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo='
 
@@ -31,6 +32,7 @@ LOW_RESOURCE=0
 SKIP_DEPS=0
 FORCE_ENDPOINT=
 FORCE_PORT=
+MODE=v4
 
 log() {
   printf '%s\n' "$*" >&2
@@ -65,6 +67,11 @@ parse_args() {
         [ "$#" -gt 0 ] || { echo "missing value for --port" >&2; exit 1; }
         FORCE_PORT="$1"
         ;;
+      --mode)
+        shift
+        [ "$#" -gt 0 ] || { echo "missing value for --mode" >&2; exit 1; }
+        MODE="$1"
+        ;;
       -h|--help)
         usage
         exit 0
@@ -82,13 +89,14 @@ parse_args() {
 usage() {
   cat <<'EOF'
 usage:
-  sh warp-ipv4-installer.sh [install|reprobe|status] [--low-resource] [--skip-deps] [--endpoint IP] [--port PORT]
+  sh warp-lite.sh [install|reprobe|status] [--mode v4|v6] [--low-resource] [--skip-deps] [--endpoint IP] [--port PORT]
 
 examples:
-  sh warp-ipv4-installer.sh
-  sh warp-ipv4-installer.sh install --low-resource
-  sh warp-ipv4-installer.sh reprobe
-  sh warp-ipv4-installer.sh install --endpoint 2606:4700:d0::a29f:c001 --port 500
+  sh warp-lite.sh
+  sh warp-lite.sh install --mode v6
+  sh warp-lite.sh install --low-resource
+  sh warp-lite.sh reprobe --mode v4
+  sh warp-lite.sh install --endpoint 2606:4700:d0::a29f:c001 --port 500
 EOF
 }
 
@@ -108,6 +116,16 @@ detect_os() {
 }
 
 select_profile() {
+  case "$MODE" in
+    v4|v6)
+      :
+      ;;
+    *)
+      echo "unsupported mode: $MODE (use v4 or v6)" >&2
+      exit 1
+      ;;
+  esac
+
   if [ "$LOW_RESOURCE" = "1" ]; then
     ENDPOINTS="$LOW_RESOURCE_ENDPOINTS"
     PORTS="$LOW_RESOURCE_PORTS"
@@ -171,13 +189,23 @@ write_conf() {
   cat > "$CONF_FILE" <<EOF
 [Interface]
 PrivateKey = ${PRIVATE_KEY}
-Address = 172.16.0.2/32
+Address = ${WARP_V4}/32
 Address = ${WARP_V6}/128
 MTU = 1280
 
 [Peer]
 PublicKey = ${PEER_KEY}
+EOF
+  if [ "$MODE" = "v4" ]; then
+    cat >> "$CONF_FILE" <<EOF
 AllowedIPs = 0.0.0.0/0
+EOF
+  else
+    cat >> "$CONF_FILE" <<EOF
+AllowedIPs = ::/0
+EOF
+  fi
+  cat >> "$CONF_FILE" <<EOF
 Endpoint = [${endpoint}]:${port}
 PersistentKeepalive = 25
 EOF
@@ -188,7 +216,7 @@ save_state() {
   endpoint="$1"
   port="$2"
   mkdir -p "$STATE_DIR"
-  printf '%s %s\n' "$endpoint" "$port" > "$STATE_FILE"
+  printf 'mode=%s\nendpoint=%s\nport=%s\n' "$MODE" "$endpoint" "$port" > "$STATE_FILE"
 }
 
 read_state() {
@@ -211,18 +239,18 @@ bring_down() {
 }
 
 bring_up() {
-  wg-quick up warp >/tmp/warp-ipv4-up.log 2>&1
+  wg-quick up warp >/tmp/warp-lite-up.log 2>&1
 }
 
 try_up() {
   endpoint="$1"
   port="$2"
-  log "==> trying [${endpoint}]:${port}"
+  log "==> trying [$endpoint]:$port ($MODE)"
   write_conf "$endpoint" "$port"
   bring_down
   if ! bring_up; then
     log "wg-quick up failed"
-    cat /tmp/warp-ipv4-up.log >&2 || true
+    cat /tmp/warp-lite-up.log >&2 || true
     return 1
   fi
   sleep "$PROBE_SLEEP"
@@ -246,20 +274,33 @@ probe_all() {
 }
 
 status() {
+  echo '=== mode ==='
+  echo "$MODE"
   echo '=== wg show warp ==='
   wg show warp 2>/dev/null || true
   echo '=== saved endpoint ==='
   read_state || true
-  echo '=== ipv4 ip ==='
-  curl -4 -s --max-time 12 https://api.ipify.org || true
-  echo
-  echo '=== ipv6 ip ==='
-  curl -6 -s --max-time 12 https://api64.ipify.org || true
-  echo
-  if [ "$LOW_RESOURCE" != "1" ]; then
-    echo '=== ipv4 trace ==='
-    curl -4 -s --max-time 12 https://www.cloudflare.com/cdn-cgi/trace || true
+  if [ "$MODE" = "v4" ]; then
+    echo '=== ipv4 ip ==='
+    curl -4 -s --max-time 12 https://api.ipify.org || true
     echo
+    echo '=== ipv6 ip ==='
+    curl -6 -s --max-time 12 https://api64.ipify.org || true
+    echo
+    if [ "$LOW_RESOURCE" != "1" ]; then
+      echo '=== ipv4 trace ==='
+      curl -4 -s --max-time 12 https://www.cloudflare.com/cdn-cgi/trace || true
+      echo
+    fi
+  else
+    echo '=== ipv6 ip ==='
+    curl -6 -s --max-time 12 https://api64.ipify.org || true
+    echo
+    if [ "$LOW_RESOURCE" != "1" ]; then
+      echo '=== ipv6 trace ==='
+      curl -6 -s --max-time 12 https://www.cloudflare.com/cdn-cgi/trace || true
+      echo
+    fi
   fi
 }
 
@@ -296,11 +337,15 @@ case "\${1:-status}" in
   status)
     wg show warp 2>/dev/null || true
     echo '---'
-    curl -4 -s --max-time 12 https://api.ipify.org || true
+    if grep -q '^AllowedIPs = ::/0' /etc/wireguard/warp.conf 2>/dev/null; then
+      curl -6 -s --max-time 12 https://api64.ipify.org || true
+    else
+      curl -4 -s --max-time 12 https://api.ipify.org || true
+    fi
     echo
     ;;
   *)
-    echo "usage: warp-ipv4 {up|down|restart|reprobe|status}" >&2
+    echo "usage: warp-lite {up|down|restart|reprobe|status}" >&2
     exit 1
     ;;
 esac
@@ -328,7 +373,7 @@ write_systemd_autostart() {
   mkdir -p /etc/systemd/system
   cat > "$SYSTEMD_SERVICE" <<EOF
 [Unit]
-Description=WARP IPv4 over native IPv6
+Description=WARP Lite over native IPv6
 After=network-online.target
 Wants=network-online.target
 
@@ -343,7 +388,7 @@ ExecStop=/usr/bin/wg-quick down warp
 WantedBy=multi-user.target
 EOF
   systemctl daemon-reload >/dev/null 2>&1 || true
-  systemctl enable warp-ipv4.service >/dev/null 2>&1 || true
+  systemctl enable warp-lite.service >/dev/null 2>&1 || true
 }
 
 write_autostart() {
@@ -374,6 +419,7 @@ install_main() {
   download_self_copy
   echo
   echo "Installed successfully"
+  echo "Mode: $MODE"
   echo "Endpoint: [${endpoint}]:${port}"
   status
 }
@@ -391,7 +437,7 @@ reprobe_main() {
   save_state "$endpoint" "$port"
   write_autostart
   download_self_copy
-  echo "Switched to [${endpoint}]:${port}"
+  echo "Switched to mode=$MODE endpoint=[${endpoint}]:${port}"
   status
 }
 
